@@ -1,0 +1,125 @@
+---
+title: "Projekt - odnawialne źródła energii"
+
+author: "Jędrzej Kubiak"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+      toc: true
+      toc_depth: 2
+      toc_float:
+        collapsed: true
+        smooth_scroll: true
+---
+
+# Wstęp
+
+Poniższy raport ma na celu podjęcie analizy danych pochodzących z czujników umieszczonych przy panelach fotowoltaicznych. Dane zawierają informacje godzinowe z pojedynczej jednostki wytwarzającej eneregie elektryczną ze światła słonecznego. Zbór danych zawiera róWnież informacje pogodowe oraz geograficzne. Kolumny dla których wartość korelacji była nieznaczna zostały pominęte przy analizie. Atrybuty kwh oraz irradiamento zostały uzupełnione miesięcznymi wartościami średnimi w poszczegónych godzinach.
+Opis analizowanych danych został umieszczony w pliku codebook.  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Ładowanie bibliotek
+```{r library, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(dplyr)
+library(corrplot)
+library(gridExtra)
+library(plotly)
+library(caret)
+```
+
+# Wczytanie danych
+```{r import, cache=FALSE}
+df <- read.csv("elektrownie.csv", row.names=1)
+df<- df %>% mutate(month= format(as.POSIXct(data, format='%m/%d/%Y %H:%M'), "%Y-%m"))
+df <- df %>% mutate(hour= as.numeric(format(as.POSIXct(data, format='%m/%d/%Y %H:%M'), "%H")))
+```
+
+# Uzupełnienie brakujących danych
+
+```{r brakujace dane, warning=FALSE}
+meanIrr<-df%>%filter(irradiamento != 0) %>% group_by(month,hour)%>%summarise(mean=mean(irradiamento))
+meanKWH<-df%>%filter(kwh != 0) %>% group_by(month, hour)%>%summarise(mean=mean(kwh))
+df <- df %>% mutate(irradiamento = ifelse(irradiamento != 0,irradiamento, as.numeric(meanIrr[meanIrr$hour == hour & meanIrr$month == month,]$mean))) %>% filter(!is.na(irradiamento))
+df <- df %>% mutate(kwh = ifelse(kwh != 0, kwh,                         as.numeric(meanKWH[meanKWH$hour == hour & meanKWH$month == month,]$mean))) %>% filter(!is.na(kwh))
+```
+
+# Powtarzalność
+```{r powtarzalnosc}
+set.seed(23)
+```
+
+# Podstawowe statystyki
+
+W analizowanym zbiorze znajduje sie `r nrow(df)` wierszy i  `r ncol(df)` kolumn. Poniżej znajduje się podsumowanie wybranych kolumn.
+
+```{r summary}
+summary(select(df,data,lat,lon,irradiamento,altitude,humidity,tempi,irri,kwh,dist,azimuthi,windspeed,pressure ))
+```
+# Analiza wartości atrybutów - prezentacja rozkładów wartości
+
+```{r rozklady, fig.width=10, fig.height=5}
+przyklady<-select(df,lat,lon,irradiamento,altitude,humidity,tempi,dist,azimuthi,kwh,windspeed,pressure)
+a <- list()
+for (col in colnames(przyklady)) {
+a[[col]] <-((ggplot(przyklady) +
+    aes_string(x=col) +
+    geom_histogram(bins = 30))) 
+}
+
+do.call("grid.arrange",c(a, ncol = 3))
+
+```
+
+# Korelacja między zmiennymi
+
+```{r corr, fig.width=20,fig.height=15}
+cor <- cor(df %>% select(-data, -month, -hour),use="complete.obs")
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+corrplot(cor,type="upper",order="hclust", tl.col = "black", method = "color",col=col(200), addgrid.col = "black", diag=FALSE, tl.srt = 45)
+```
+
+Z wykresu można odczytać że istnieje dodatnia wartośc korelacji pomiędzy między parametrami kwh oraz irrdiamento, co wynika z zasady działania paneli fotowoltaicznych.
+Istnienie dodatniej wartość korelacji między godziną a azymutem jest spowodowanem faktem, że kąt azymutu rośnie wraz z godziną.
+  
+# Wykres wytwarzanej energii w zależności od czasu i przestrzeni
+```{r interaktywny, warning=FALSE}
+wykres <- df %>% group_by(idsito,anno,month) %>% summarise(kwh = sum(kwh))
+ggplotwykres <- ggplot(data = wykres, aes(month,kwh, color=factor(idsito))) + 
+  geom_point()+
+  labs(y="kWh") + 
+  labs(x="miesiąc")+
+  labs("Interaktywny wykres")
+ggplotly(ggplotwykres,dynamicTicks = TRUE,width = NULL, height = NULL)
+
+```
+
+
+
+# Regresor
+```{r regresor}
+rdf<-df%>% select(idsito, irradiamento, altitude,humidity,tempi, temperatura_ambiente
+,cloudcover,irri,dist,azimuthi,pressure,windspeed
+, kwh)
+inTraining <- createDataPartition(y = rdf$idsito, p = .75, list = FALSE)
+training <- rdf[inTraining, ]
+testing <- rdf[-inTraining, ]
+ctrl <- trainControl(method = "repeatedcv", number = 2,repeats = 5)
+
+fitLm <- train(kwh ~ .,
+                data = training,
+                method = "lm",
+                metric = "RMSE",
+                trControl = ctrl)
+lmPredict<-predict(fitLm, newdata=testing)
+postResample(lmPredict,testing$kwh)
+```
+
+# Analiza ważności atrybutów
+```{r analiza}
+fitLm %>% summary()
+```
+
+Według powyższych wyników największy wpływ na ilość wytwarzanej energi przez panele fotowoltaiczne ma nasłonecznienie, natomiast najgorszy wilgotność. Znacząco negatywny wpływ mają również zachmurzenie, azymut i ciśnienie atmosferyczne.

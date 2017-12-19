@@ -1,0 +1,25 @@
+idmodel - model czujnika
+idbrand - marka czujnika
+lat - szerokość geograficzna
+lon - długość geograficzna
+ageinmonths - wiek czujnika
+anno - rok
+day - dzień
+ora - godzina
+data - data
+temperatura_ambiente - temperatura powietrza
+irradiamento - napromieniowanie słoneczne
+pressure - ciśnienie atmosferyczne
+windspeed - prędkość wiatru
+humidity - wilgotność
+icon
+dewpoint - punkt rosy
+windbearing - kierunek wiatru
+cloudcover - zachmurzenie
+tempi
+irri
+dist
+altitude - wysokość
+azimuth - azymut
+kwh - wygenerowana energia
+pcnm1-pcmn15 - odczyty czujników
